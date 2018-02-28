@@ -31,6 +31,7 @@ import (
 	"text/template"
 	"time"
 
+	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/net/context"
 	"golang.org/x/perf/benchstat"
 
@@ -79,20 +80,34 @@ func main() {
 	log.SetFlags(0)
 
 	var port int
+	var http2 bool
+	var domains string
 	flag.IntVar(&port, "port", 7788, "the port to run the server")
 	flag.StringVar(&gcsBucket, "bucket", "census-demos", "the GCS bucket to use")
 	flag.StringVar(&gcsProject, "project", "census-demos", "the GCS project to use")
+	flag.BoolVar(&http2, "http2", false, "whether to run it as an HTTP/2 and HTTPS enabled server")
+	flag.StringVar(&domains, "domains", "", "the comma separated list of domains e.g. foo.example.org,baz.example.com")
 	flag.Parse()
 
 	mux := http.NewServeMux()
 	mux.Handle("/benchmark", http.HandlerFunc(handleBenchmarkPing))
-	mux.Handle("/health", http.HandlerFunc(health))
+	mux.Handle("/ping", http.HandlerFunc(health))
 
-	addr := fmt.Sprintf(":%d", port)
-	log.Printf("Running bencher server at %q", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("ListenAndServe: %v", err)
+	if !http2 {
+		addr := fmt.Sprintf(":%d", port)
+		log.Printf("Running non-HTTP/2 bencher server at %q", addr)
+		if err := http.ListenAndServe(addr, mux); err != nil {
+			log.Fatalf("ListenAndServe: %v", err)
+		}
+		return
 	}
+
+	allDomains := strings.Split(domains, ",")
+	if len(allDomains) == 0 || strings.TrimSpace(allDomains[0]) == "" {
+		log.Fatal("expecting at least one non-blank domain, separated by comma if many")
+	}
+	// Otherwise time to run it as an HTTP/2 and HTTPS enabled server
+	log.Fatal(http.Serve(autocert.NewListener(allDomains...), mux))
 }
 
 func handleBenchmarkPing(w http.ResponseWriter, r *http.Request) {
